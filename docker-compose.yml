@@ -1,0 +1,98 @@
+services:
+  # ─────────────────────────────────────────────
+  # RabbitMQ Broker
+  # Management UI available at: http://localhost:15672 (guest/guest)
+  # ─────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: ipo_rabbitmq
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ipo_network
+
+  # ─────────────────────────────────────────────
+  # FastAPI Backend Service (API)
+  # Swagger docs available at: http://localhost:8000/docs
+  # ─────────────────────────────────────────────
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: ipo_backend
+    command: ["/app/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    ports:
+      - "8000:8000"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    env_file:
+      - ./server/.env
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    volumes:
+      - ./server/app:/app/app
+    networks:
+      - ipo_network
+
+  # ─────────────────────────────────────────────
+  # Allotment Scraper Worker Service
+  # Consumes from queue and scrapes registrar
+  # ─────────────────────────────────────────────
+  worker:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: ipo_worker
+    command: ["/app/.venv/bin/python", "-m", "app.workers.allotment_worker"]
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    env_file:
+      - ./server/.env
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    volumes:
+      - ./server/app:/app/app
+    networks:
+      - ipo_network
+
+  # ─────────────────────────────────────────────
+  # Next.js Frontend Service
+  # Dashboard available at: http://localhost:3000
+  # ─────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: ipo_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    volumes:
+      - ./client:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - backend
+    networks:
+      - ipo_network
+
+volumes:
+  rabbitmq_data:
+
+networks:
+  ipo_network:
+    name: ipo_network

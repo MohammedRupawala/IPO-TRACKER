@@ -1,0 +1,50 @@
+version: "3.9"
+
+services:
+  # ─────────────────────────────────────────────
+  # RabbitMQ broker
+  # Management UI: http://localhost:15672  (guest/guest)
+  # ─────────────────────────────────────────────
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: ipo_rabbitmq
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────────
+  # Allotment worker process
+  # Consumes from allotment_tasks queue,
+  # calls Cameo scraper, writes to Supabase.
+  # ─────────────────────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: deployment/Dockerfile
+      # Note: build context is server/ so COPY paths are relative to server/
+    container_name: ipo_worker
+    command: ["/app/.venv/bin/python", "-m", "app.workers.allotment_worker"]
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+    env_file:
+      - .env
+    environment:
+      # Override RabbitMQ URL to use the Docker service name
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    restart: unless-stopped
+
+volumes:
+  rabbitmq_data:
