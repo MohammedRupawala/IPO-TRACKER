@@ -7,7 +7,6 @@ env/
 venv/
 ENV/
 bin/
-lib/
 include/
 
 # Next.js build output
